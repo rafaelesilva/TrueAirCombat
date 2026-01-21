@@ -1,30 +1,28 @@
 import pygame
 import sys
 import os
+import random  # <--- FALTAVA ESSA LINHA AQUI!
 from settings import *
-from sprites import Player, Background, Explosion, Enemy
+from sprites import Player, Background, Explosion, Enemy, Cloud
 from weapons import Projectile
 from level_manager import LevelManager
 from interface import UIManager
 
-# --- DIAGNÓSTICO DE ARQUIVOS (Olhe o Console!) ---
-print("\n--- INICIANDO VERIFICAÇÃO DE ARQUIVOS ---")
+# --- DIAGNÓSTICO DE ARQUIVOS ---
+print("\n--- INICIANDO VERIFICAÇÃO ---")
 folder = os.path.dirname(__file__)
 files = os.listdir(folder)
-print(f"Pasta do jogo: {folder}")
-print("Arquivos encontrados:")
-tem_gripen = False
-for f in files:
-    print(f" - {f}")
-    if "gripen_neutral" in f:
-        tem_gripen = True
-
-if not tem_gripen:
-    print("!!! ALERTA: 'gripen_neutral.png' NÃO ENCONTRADO !!!")
-    print("O avião ficará como um triângulo cinza.")
+assets_folder = os.path.join(folder, 'assets')
+if os.path.exists(assets_folder):
+    assets_files = os.listdir(assets_folder)
+    print(f"Arquivos em 'assets': {len(assets_files)} encontrados.")
+    if "bg_level1.png" in assets_files:
+        print(">>> SUCESSO: 'bg_level1.png' encontrado!")
+    else:
+        print("!!! ALERTA: 'bg_level1.png' não encontrado na pasta assets.")
 else:
-    print(">>> SUCESSO: Imagem do Gripen encontrada!")
-print("------------------------------------------\n")
+    print("!!! ALERTA: Pasta 'assets' não encontrada.")
+print("-----------------------------\n")
 
 class Game:
     def __init__(self):
@@ -47,7 +45,9 @@ class Game:
         
         self.fingers = {} 
         self.running = True
-        self.bg = Background()
+        
+        # Carrega o cenário da Fase 1
+        self.bg = Background("bg_level1.png")
 
     def new_game(self):
         self.all_sprites = pygame.sprite.Group()
@@ -55,6 +55,12 @@ class Game:
         self.bullets = pygame.sprite.Group()
         self.enemy_bullets = pygame.sprite.Group()
         
+        # --- ADICIONA NUVENS (Fase 1) ---
+        for i in range(8):
+            c = Cloud()
+            c.rect.y = random.randint(0, HEIGHT) 
+            self.all_sprites.add(c)
+
         # Cria o jogador
         self.player = Player(self.selected_plane)
         self.all_sprites.add(self.player)
@@ -62,11 +68,9 @@ class Game:
         self.level_manager = LevelManager(self)
         self.state = 'GAME'
 
-    # --- FUNÇÃO MÁGICA PARA CONSERTAR O TOUCH ---
     def get_touch_pos(self, event):
         # Pega o tamanho real da janela naquele momento
         w, h = self.screen.get_size()
-        # Converte a posição relativa (0.0 a 1.0) para pixels exatos
         return int(event.x * w), int(event.y * h)
 
     def run(self):
@@ -95,13 +99,13 @@ class Game:
                 if event.joy < len(self.joysticks):
                      if event.button == 0: self.state = 'SELECT'
             
-            # Touch (Usando a correção)
+            # Touch
             if event.type == pygame.FINGERDOWN:
                 x, y = self.get_touch_pos(event)
                 if self.ui.btn_campanha.collidepoint(x,y): self.state = 'SELECT'
                 elif self.ui.btn_missao.collidepoint(x,y): self.state = 'SELECT'
             
-            # Mouse (Para teste no PC)
+            # Mouse
             if event.type == pygame.MOUSEBUTTONDOWN:
                 if self.ui.btn_campanha.collidepoint(event.pos): self.state = 'SELECT'
 
@@ -114,7 +118,6 @@ class Game:
                 for btn in self.ui.plane_buttons:
                     if btn['rect'].collidepoint(x,y):
                         self.selected_plane = btn['name']
-                        print(f"Selecionado: {self.selected_plane}")
                         self.new_game()
             
             if event.type == pygame.MOUSEBUTTONDOWN:
@@ -138,23 +141,22 @@ class Game:
             if joy.get_numbuttons() > 0:
                 if joy.get_button(0): shoot = True
 
-        # --- INPUT TOUCHSCREEN (CORRIGIDO) ---
+        # --- INPUT TOUCHSCREEN ---
         for event in pygame.event.get():
             if event.type == pygame.QUIT: self.running = False
             
-            # Troca de arma (Z no teclado ou botão joy)
+            # Troca de arma
             if event.type == pygame.KEYDOWN and event.key == pygame.K_z:
                 self.player.weapons.switch()
             if event.type == pygame.JOYBUTTONDOWN:
                  if event.button == 1: self.player.weapons.switch()
 
-            # Rastreamento de dedos
+            # Dedos na tela
             if event.type == pygame.FINGERDOWN or event.type == pygame.FINGERMOTION:
-                # AQUI ESTÁ O SEGREDO DO TOUCH PRECISO
                 x, y = self.get_touch_pos(event)
                 self.fingers[event.finger_id] = (x, y)
                 
-                # Clique único no botão SW (Switch)
+                # Clique único no botão SW
                 if event.type == pygame.FINGERDOWN:
                     if self.ui.btn_switch.collidepoint(x, y):
                         self.player.weapons.switch()
@@ -163,7 +165,7 @@ class Game:
                 if event.finger_id in self.fingers:
                     del self.fingers[event.finger_id]
 
-        # Verifica D-PAD e Botão de Tiro
+        # Verifica botões virtuais
         for finger_pos in self.fingers.values():
             fx, fy = finger_pos
             if self.ui.btn_left.collidepoint(fx, fy): move_x = -1
@@ -221,4 +223,3 @@ class Game:
 if __name__ == "__main__":
     g = Game()
     g.run()
-
