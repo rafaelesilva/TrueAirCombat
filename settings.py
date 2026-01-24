@@ -33,10 +33,10 @@ RADAR_BG = (0, 20, 0, 150)
 RADAR_BORDER = (0, 255, 0)
 
 # --- CONFIGURAÇÃO DE ALVOS TERRESTRES ---
+# Removida a entrada 'BRIDGE'
 TARGET_DATA = {
     'RADAR':  {'hp': 100, 'score': 200, 'color': (150, 150, 150), 'size': (40, 40), 'shape': 'CIRCLE'},
     'BUNKER': {'hp': 300, 'score': 500, 'color': (100, 100, 80),  'size': (60, 50), 'shape': 'RECT'},
-    'BRIDGE': {'hp': 500, 'score': 800, 'color': (80, 80, 80),    'size': (120, 40),'shape': 'RECT'},
     'FACTORY':{'hp': 400, 'score': 600, 'color': (120, 100, 100), 'size': (80, 70), 'shape': 'RECT'}
 }
 

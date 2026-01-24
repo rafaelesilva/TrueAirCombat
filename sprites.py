@@ -8,49 +8,55 @@ from weapons import WeaponSystem
 GAME_FOLDER = os.path.dirname(__file__)
 ASSETS_FOLDER = os.path.join(GAME_FOLDER, 'assets')
 
-# --- ALVOS TERRESTRES (PRÉDIOS/RADARES) ---
+# --- ALVOS TERRESTRES ---
 class GroundTarget(pygame.sprite.Sprite):
     def __init__(self, x, y, type_name):
         super().__init__()
         self.type = type_name
+        # Usa BUNKER como padrão se o tipo não existir (segurança)
         stats = TARGET_DATA.get(type_name, TARGET_DATA['BUNKER'])
         self.hp = stats['hp']
         self.max_hp = stats['hp']
         self.score_val = stats['score']
         
         w, h = stats['size']
-        self.image = pygame.Surface((w, h), pygame.SRCALPHA)
         
-        # Desenha o alvo (Fallback se não tiver PNG)
-        color = stats['color']
-        if stats['shape'] == 'CIRCLE':
-            # Radar (Círculo com antena girando)
-            pygame.draw.circle(self.image, color, (w//2, h//2), w//2)
-            pygame.draw.circle(self.image, (20, 20, 20), (w//2, h//2), w//2, 2)
-            pygame.draw.line(self.image, (200, 0, 0), (w//2, h//2), (w, 0), 2)
-        else:
-            # Prédio/Bunker (Retângulo 3D fake)
-            pygame.draw.rect(self.image, color, (0, 0, w, h))
-            pygame.draw.rect(self.image, (50, 50, 50), (0, 0, w, h), 2) # Borda
-            pygame.draw.rect(self.image, (30, 30, 30), (5, 5, w-10, h-10)) # Telhado
-            if type_name == 'BRIDGE':
-                # Listras da estrada
-                pygame.draw.line(self.image, (255, 255, 255), (0, h//2), (w, h//2), 2)
+        self.image = None
+        try:
+            filename = f"{type_name.lower()}.png"
+            path = os.path.join(ASSETS_FOLDER, filename)
+            img_loaded = pygame.image.load(path).convert_alpha()
+            self.image = pygame.transform.scale(img_loaded, (w, h))
+        except Exception as e:
+            pass
+
+        # Fallback (Desenho manual se não tiver imagem)
+        if self.image is None:
+            self.image = pygame.Surface((w, h), pygame.SRCALPHA)
+            color = stats['color']
+            if stats['shape'] == 'CIRCLE':
+                pygame.draw.circle(self.image, color, (w//2, h//2), w//2)
+                pygame.draw.circle(self.image, (20, 20, 20), (w//2, h//2), w//2, 2)
+                pygame.draw.line(self.image, (200, 0, 0), (w//2, h//2), (w, 0), 2)
+            else:
+                pygame.draw.rect(self.image, color, (0, 0, w, h))
+                pygame.draw.rect(self.image, (50, 50, 50), (0, 0, w, h), 2) # Borda
+                pygame.draw.rect(self.image, (30, 30, 30), (5, 5, w-10, h-10)) # Telhado
+                # (Removido o if da BRIDGE que estava aqui)
 
         self.rect = self.image.get_rect(center=(x, y))
 
-# --- RUÍNAS (DEPOIS DE DESTRUÍDO) ---
+# --- RUÍNAS (CRATERA) ---
 class Crater(pygame.sprite.Sprite):
     def __init__(self, center, size_tuple):
         super().__init__()
         w, h = size_tuple
         self.image = pygame.Surface((w, h), pygame.SRCALPHA)
-        # Desenha uma mancha preta/queimada
-        pygame.draw.ellipse(self.image, (20, 10, 0), (0, 0, w, h))
-        pygame.draw.ellipse(self.image, (50, 20, 0), (5, 5, w-10, h-10))
+        pygame.draw.ellipse(self.image, (30, 20, 10), (0, 0, w, h))
+        pygame.draw.ellipse(self.image, (10, 5, 0), (w//4, h//4, w//2, h//2))
         self.rect = self.image.get_rect(center=center)
 
-# --- Classes Player, BigMap, Enemy, etc (MANTIDAS IGUAIS) ---
+# --- JOGADOR (Mantido igual) ---
 class Player(pygame.sprite.Sprite):
     def __init__(self, model_name):
         super().__init__()
@@ -153,6 +159,7 @@ class Enemy(pygame.sprite.Sprite):
         self.change_dir_timer += 1
         if self.change_dir_timer > 100: self.change_dir_timer = 0; self.pick_new_direction()
 
+# Demais Classes (Explosion, PowerUp, Cloud, MassiveExplosion)
 class Explosion(pygame.sprite.Sprite):
     def __init__(self, center):
         super().__init__()

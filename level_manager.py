@@ -9,9 +9,6 @@ class LevelManager:
         self.timer = 0
         self.wait_time = 120
         self.available_planes = list(AIRCRAFT_DATA.keys())
-        
-        # --- SPAWN DE PRÉDIOS E RADARES ---
-        # Como não temos um editor de mapa, vamos espalhar aleatoriamente
         self.spawn_ground_targets()
 
     def spawn_ground_targets(self):
@@ -30,10 +27,7 @@ class LevelManager:
             x, y = random.randint(200, MAP_WIDTH-200), random.randint(200, MAP_HEIGHT-200)
             self.game.ground_targets.add(GroundTarget(x, y, 'FACTORY'))
             
-        # 2 Pontes (Simuladas)
-        for _ in range(2):
-            x, y = random.randint(200, MAP_WIDTH-200), random.randint(200, MAP_HEIGHT-200)
-            self.game.ground_targets.add(GroundTarget(x, y, 'BRIDGE'))
+        # (Removido o loop que criava as PONTES aqui)
 
     def update(self):
         self.timer += 1
