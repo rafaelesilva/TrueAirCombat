@@ -8,19 +8,17 @@ from weapons import WeaponSystem
 GAME_FOLDER = os.path.dirname(__file__)
 ASSETS_FOLDER = os.path.join(GAME_FOLDER, 'assets')
 
-# --- Classes Player, BigMap, Enemy, Cloud mantidas iguais ---
-# (Copie as classes Player, BigMap, Enemy, Cloud, PowerUp do seu arquivo anterior ou da minha resposta anterior.
-#  Vou colocar apenas a EXPLOSÃO NOVA aqui para economizar espaço, mas você precisa manter as outras!)
-
 class Player(pygame.sprite.Sprite):
     def __init__(self, model_name):
         super().__init__()
         if model_name in AIRCRAFT_DATA: self.data = AIRCRAFT_DATA[model_name]
         else: self.data = AIRCRAFT_DATA['Gripen F-39E']
         self.prefix = self.data['prefix']
+        
         base_w = int(70 * SCALE * self.data.get('scale', 1.0))
         base_h = int(90 * SCALE * self.data.get('scale', 1.0))
         self.base_size = (base_w, base_h)
+        
         self.sprites = {}
         self.has_images = False
         try:
@@ -31,22 +29,30 @@ class Player(pygame.sprite.Sprite):
             self.has_images = True
         except: self.has_images = False
 
-        if self.has_images: self.original_image = self.sprites['neutral']
+        if self.has_images: 
+            self.original_image = self.sprites['neutral']
         else:
             self.original_image = pygame.Surface(self.base_size, pygame.SRCALPHA)
             color = (100, 100, 120)
             if self.prefix == 'b2':
                 pygame.draw.polygon(self.original_image, (30, 30, 30), [(base_w//2, 0), (base_w, base_h//2), (base_w//2, base_h-10), (0, base_h//2)])
             elif self.prefix == 'b52':
-                pygame.draw.rect(self.original_image, color, (base_w//2 - 5, 0, 10, base_h)); pygame.draw.rect(self.original_image, color, (0, base_h//3, base_w, 10))
-            else: pygame.draw.polygon(self.original_image, color, [(base_w//2, 0), (base_w, base_h), (0, base_h)])
+                pygame.draw.rect(self.original_image, color, (base_w//2 - 5, 0, 10, base_h))
+                pygame.draw.rect(self.original_image, color, (0, base_h//3, base_w, 10))
+            else: 
+                pygame.draw.polygon(self.original_image, color, [(base_w//2, 0), (base_w, base_h), (0, base_h)])
 
         self.image = self.original_image
         self.rect = self.image.get_rect(center=(MAP_WIDTH // 2, MAP_HEIGHT // 2))
+        
         self.hp = self.data['hp']
         self.max_hp = self.data['hp']
         self.speed = self.data['speed'] * SCALE
-        self.weapons = WeaponSystem(self.data.get('missile', 'AIM-120'))
+        
+        # --- CARREGA O ARSENAL (LISTA DE ARMAS) ---
+        my_loadout = self.data.get('loadout', ['VULCAN'])
+        self.weapons = WeaponSystem(my_loadout)
+        
         self.vel_x, self.vel_y = 0, 0
         self.angle = 0 
         self.is_shooting, self.shoot_timer = False, 0
@@ -104,7 +110,11 @@ class Enemy(pygame.sprite.Sprite):
         except: self.original_image = pygame.Surface(self.base_size, pygame.SRCALPHA); pygame.draw.polygon(self.original_image, (200, 50, 50), [(base_w//2, base_h), (base_w, 0), (0, 0)])
         self.image = self.original_image; self.rect = self.image.get_rect(center=(x, y))
         self.hp = self.data['hp'] * 0.4; self.speed = (self.data['speed'] * 0.5) * SCALE 
-        self.missile_type = self.data.get('missile', 'AIM-120')
+        
+        # Inimigo pega a segunda arma (geralmente míssil) para atirar em você
+        loadout = self.data.get('loadout', ['VULCAN'])
+        self.missile_type = loadout[1] if len(loadout) > 1 else loadout[0]
+        
         self.last_shot_time = pygame.time.get_ticks(); self.shot_delay = random.randint(2000, 4000)
         self.vel_x, self.vel_y = 0, 0; self.change_dir_timer = 0; self.angle = 0; self.pick_new_direction()
     def pick_new_direction(self):
@@ -129,7 +139,7 @@ class Enemy(pygame.sprite.Sprite):
         self.change_dir_timer += 1
         if self.change_dir_timer > 100: self.change_dir_timer = 0; self.pick_new_direction()
 
-# --- EXPLOSÃO PADRÃO ---
+# Classes Explosion, MassiveExplosion, PowerUp, Cloud (MANTIDAS IGUAIS AO MAIN)
 class Explosion(pygame.sprite.Sprite):
     def __init__(self, center):
         super().__init__()
@@ -144,31 +154,23 @@ class Explosion(pygame.sprite.Sprite):
             pygame.draw.circle(self.image, (255, random.randint(100,255), 0), (self.size//2, self.size//2), (self.size//2) * (self.timer/15))
         if self.timer <= 0: self.kill()
 
-# --- EXPLOSÃO GIGANTE (NOVA) ---
 class MassiveExplosion(pygame.sprite.Sprite):
     def __init__(self, center):
         super().__init__()
-        self.max_size = int(250 * SCALE) # Muito maior
+        self.max_size = int(250 * SCALE)
         self.image = pygame.Surface((self.max_size, self.max_size), pygame.SRCALPHA)
         self.rect = self.image.get_rect(center=center)
         self.timer = 0
         self.duration = 20
-
     def update(self):
         self.timer += 1
         self.image.fill((0,0,0,0))
-        
         progress = self.timer / self.duration
         current_radius = int((self.max_size // 2) * progress)
-        
-        # Onda de choque (Anel branco)
         pygame.draw.circle(self.image, (255, 255, 255, 100), (self.max_size//2, self.max_size//2), current_radius, 5)
-        
-        # Bola de fogo interna
         inner_radius = int(current_radius * 0.8)
-        color = (255, random.randint(50, 150), 0) # Laranja/Vermelho
+        color = (255, random.randint(50, 150), 0)
         pygame.draw.circle(self.image, color, (self.max_size//2, self.max_size//2), inner_radius)
-        
         if self.timer >= self.duration: self.kill()
 
 class PowerUp(pygame.sprite.Sprite):
