@@ -8,7 +8,6 @@ from weapons import WeaponSystem
 GAME_FOLDER = os.path.dirname(__file__)
 ASSETS_FOLDER = os.path.join(GAME_FOLDER, 'assets')
 
-# --- CLASSE JOGADOR ---
 class Player(pygame.sprite.Sprite):
     def __init__(self, model_name):
         super().__init__()
@@ -16,25 +15,21 @@ class Player(pygame.sprite.Sprite):
         else: self.data = AIRCRAFT_DATA['Gripen F-39E']
         self.prefix = self.data['prefix']
         
-        base_w = int(70 * SCALE * self.data.get('scale_factor', 1.0))
-        base_h = int(90 * SCALE * self.data.get('scale_factor', 1.0))
+        base_w = int(70 * SCALE * self.data.get('scale', 1.0))
+        base_h = int(90 * SCALE * self.data.get('scale', 1.0))
         self.base_size = (base_w, base_h)
         
         self.sprites = {}
         self.has_images = False
         try:
-            # Carrega imagens base
             self.sprites['neutral'] = self.load_and_scale(f"{self.prefix}_neutral.png")
             self.sprites['left'] = self.load_and_scale(f"{self.prefix}_left.png")
             self.sprites['right'] = self.load_and_scale(f"{self.prefix}_right.png")
             self.sprites['shoot'] = self.load_and_scale(f"{self.prefix}_shoot.png")
             self.has_images = True
-        except Exception:
-            self.has_images = False
+        except: self.has_images = False
 
-        # Cria imagem inicial
-        if self.has_images:
-            self.original_image = self.sprites['neutral']
+        if self.has_images: self.original_image = self.sprites['neutral']
         else:
             self.original_image = pygame.Surface(self.base_size, pygame.SRCALPHA)
             pygame.draw.polygon(self.original_image, (100, 100, 120), [(base_w//2, 0), (base_w, base_h), (0, base_h)])
@@ -46,10 +41,13 @@ class Player(pygame.sprite.Sprite):
         self.hp = self.data['hp']
         self.max_hp = self.data['hp']
         self.speed = self.data['speed'] * SCALE
-        self.weapons = WeaponSystem()
+        
+        # ARMAS: Passa o míssil específico do avião
+        my_missile = self.data.get('missile', 'AIM-120')
+        self.weapons = WeaponSystem(my_missile)
+        
         self.vel_x, self.vel_y = 0, 0
         self.angle = 0 
-        
         self.is_shooting, self.shoot_timer = False, 0
         self.powerup_timer, self.powered_up = 0, False
 
@@ -72,48 +70,24 @@ class Player(pygame.sprite.Sprite):
         self.hp = min(self.hp + 20, self.max_hp)
 
     def rotate(self):
-        # Se estiver praticamente parado, não muda a rotação
-        if abs(self.vel_x) < 0.1 and abs(self.vel_y) < 0.1:
-            return
-
-        # 1. Escolhe a imagem base (Lógica nova: Só inclina nas diagonais)
+        if abs(self.vel_x) < 0.1 and abs(self.vel_y) < 0.1: return
+        
         base_img = self.sprites['neutral'] if self.has_images else self.original_image
+        if self.has_images and (abs(self.vel_x) > 0.5 and abs(self.vel_y) > 0.5):
+            base_img = self.sprites['left'] if self.vel_x < 0 else self.sprites['right']
 
-        if self.has_images:
-            # É diagonal se estiver movendo em X E em Y ao mesmo tempo
-            is_diagonal = (abs(self.vel_x) > 0.5 and abs(self.vel_y) > 0.5)
-            
-            if is_diagonal:
-                if self.vel_x < 0: 
-                    base_img = self.sprites['left'] # Diagonal Esquerda
-                else: 
-                    base_img = self.sprites['right'] # Diagonal Direita
-            else:
-                # Movimento Reto (Só X ou Só Y) -> Usa Neutral
-                base_img = self.sprites['neutral']
-
-        # 2. Calcula ângulo (em graus)
-        # Math.atan2 retorna o ângulo do vetor de movimento
         self.angle = math.degrees(math.atan2(-self.vel_y, self.vel_x)) - 90
-        
-        # 3. Aplica rotação
         self.image = pygame.transform.rotate(base_img, self.angle)
-        
-        # 4. Mantém o centro correto (evita tremedeira)
         self.rect = self.image.get_rect(center=self.rect.center)
 
     def update(self):
         self.rect.x += self.vel_x
         self.rect.y += self.vel_y
-        
-        # Limites
         if self.rect.left < 0: self.rect.left = 0
         if self.rect.right > MAP_WIDTH: self.rect.right = MAP_WIDTH
         if self.rect.top < 0: self.rect.top = 0
         if self.rect.bottom > MAP_HEIGHT: self.rect.bottom = MAP_HEIGHT
-        
         self.rotate()
-
         if self.powered_up and pygame.time.get_ticks() - self.powerup_timer > 5000:
             self.powered_up = False
 
@@ -125,10 +99,9 @@ class BigMap(pygame.sprite.Sprite):
             self.image = pygame.image.load(bg_path).convert()
             if self.image.get_size() != (MAP_WIDTH, MAP_HEIGHT):
                  self.image = pygame.transform.scale(self.image, (MAP_WIDTH, MAP_HEIGHT))
-        except Exception:
+        except:
             self.image = pygame.Surface((MAP_WIDTH, MAP_HEIGHT))
             self.image.fill((194, 178, 128)) 
-            pygame.draw.rect(self.image, (0, 100, 200), (0,0,MAP_WIDTH, MAP_HEIGHT), 50)
         self.rect = self.image.get_rect(topleft=(0, 0))
 
 class Enemy(pygame.sprite.Sprite):
@@ -136,16 +109,17 @@ class Enemy(pygame.sprite.Sprite):
         super().__init__()
         if model_name in AIRCRAFT_DATA: self.data = AIRCRAFT_DATA[model_name]
         else: self.data = AIRCRAFT_DATA['Gripen F-39E']
+        
         self.prefix = self.data['prefix']
-        base_w = int(70 * SCALE * self.data.get('scale_factor', 1.0))
-        base_h = int(90 * SCALE * self.data.get('scale_factor', 1.0))
+        base_w = int(70 * SCALE * self.data.get('scale', 1.0))
+        base_h = int(90 * SCALE * self.data.get('scale', 1.0))
         self.base_size = (base_w, base_h)
+        
         try:
             path = os.path.join(ASSETS_FOLDER, f"{self.prefix}_neutral.png")
             img = pygame.image.load(path).convert_alpha()
             self.original_image = pygame.transform.scale(img, self.base_size)
-            # CORREÇÃO: Não rotacionar 180 aqui. Eles usam a mesma orientação base do player.
-        except Exception:
+        except:
             self.original_image = pygame.Surface(self.base_size)
             self.original_image.fill((200, 50, 50))
 
@@ -154,46 +128,61 @@ class Enemy(pygame.sprite.Sprite):
         self.hp = self.data['hp'] * 0.4 
         self.speed = (self.data['speed'] * 0.5) * SCALE 
         
-        self.vel_x = 0
-        self.vel_y = 0
+        # Míssil do inimigo
+        self.missile_type = self.data.get('missile', 'AIM-120')
+        self.last_shot_time = pygame.time.get_ticks()
+        self.shot_delay = random.randint(2000, 4000) # Atira a cada 2-4 segs
+        
+        self.vel_x, self.vel_y = 0, 0
         self.change_dir_timer = 0
+        self.angle = 0
         self.pick_new_direction()
 
     def pick_new_direction(self):
-        # Garante que SEMPRE se mova (evita 0,0)
         while True:
             dir_x = random.choice([-1, 0, 1])
             dir_y = random.choice([-1, 0, 1])
-            if dir_x != 0 or dir_y != 0:
-                break
-        
+            if dir_x != 0 or dir_y != 0: break
         self.vel_x = dir_x * self.speed
         self.vel_y = dir_y * self.speed
         
-        # Rotaciona para olhar para onde vai
-        angle = math.degrees(math.atan2(-self.vel_y, self.vel_x)) - 90
-        self.image = pygame.transform.rotate(self.original_image, angle)
+        self.angle = math.degrees(math.atan2(-self.vel_y, self.vel_x)) - 90
+        self.image = pygame.transform.rotate(self.original_image, self.angle)
         self.rect = self.image.get_rect(center=self.rect.center)
+
+    def check_fire(self, player_rect, current_time):
+        # Calcula distância
+        dx = player_rect.centerx - self.rect.centerx
+        dy = player_rect.centery - self.rect.centery
+        dist = math.hypot(dx, dy)
+        
+        # Se estiver perto (600px) e recarregado, ATIRA!
+        if dist < 600 and current_time - self.last_shot_time > self.shot_delay:
+            self.last_shot_time = current_time
+            self.shot_delay = random.randint(2000, 4000)
+            
+            # Calcula ângulo para o jogador
+            angle_to_player = math.degrees(math.atan2(-dy, dx))
+            return True, angle_to_player
+        return False, 0
 
     def update(self):
         self.rect.x += self.vel_x
         self.rect.y += self.vel_y
         
-        # Ricochete nas paredes
         if self.rect.left < 0 or self.rect.right > MAP_WIDTH:
             self.vel_x *= -1
-            self.rect.x += self.vel_x # Desencalha
-            self.pick_new_direction() # Muda direção ao bater
+            self.pick_new_direction()
         if self.rect.top < 0 or self.rect.bottom > MAP_HEIGHT:
             self.vel_y *= -1
-            self.rect.y += self.vel_y # Desencalha
-            self.pick_new_direction() # Muda direção ao bater
+            self.pick_new_direction()
             
         self.change_dir_timer += 1
-        if self.change_dir_timer > 100: # Muda a cada 3 segundos
+        if self.change_dir_timer > 100:
             self.change_dir_timer = 0
             self.pick_new_direction()
 
+# Manter as classes Explosion, PowerUp, Cloud iguais...
 class Explosion(pygame.sprite.Sprite):
     def __init__(self, center):
         super().__init__()
