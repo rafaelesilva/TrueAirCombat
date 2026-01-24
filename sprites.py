@@ -1,10 +1,10 @@
 import pygame
 import os
 import random
+import math
 from settings import *
 from weapons import WeaponSystem
 
-# Garante que acha a pasta assets onde quer que esteja
 GAME_FOLDER = os.path.dirname(__file__)
 ASSETS_FOLDER = os.path.join(GAME_FOLDER, 'assets')
 
@@ -12,56 +12,46 @@ ASSETS_FOLDER = os.path.join(GAME_FOLDER, 'assets')
 class Player(pygame.sprite.Sprite):
     def __init__(self, model_name):
         super().__init__()
-        # Carrega dados da aeronave
-        if model_name in AIRCRAFT_DATA:
-            self.data = AIRCRAFT_DATA[model_name]
-        else:
-            self.data = AIRCRAFT_DATA['Gripen F-39E']
-            
-        self.model_name = model_name
+        if model_name in AIRCRAFT_DATA: self.data = AIRCRAFT_DATA[model_name]
+        else: self.data = AIRCRAFT_DATA['Gripen F-39E']
         self.prefix = self.data['prefix']
         
-        # Tamanho Base
         base_w = int(70 * SCALE * self.data.get('scale_factor', 1.0))
         base_h = int(90 * SCALE * self.data.get('scale_factor', 1.0))
         self.base_size = (base_w, base_h)
         
         self.sprites = {}
         self.has_images = False
-        
-        # Tenta carregar as imagens
         try:
+            # Carrega imagens base
             self.sprites['neutral'] = self.load_and_scale(f"{self.prefix}_neutral.png")
             self.sprites['left'] = self.load_and_scale(f"{self.prefix}_left.png")
             self.sprites['right'] = self.load_and_scale(f"{self.prefix}_right.png")
             self.sprites['shoot'] = self.load_and_scale(f"{self.prefix}_shoot.png")
             self.has_images = True
-            self.image = self.sprites['neutral']
         except Exception:
-            # Fallback se não tiver imagem: Triângulo
             self.has_images = False
-            self.image = pygame.Surface(self.base_size, pygame.SRCALPHA)
-            pygame.draw.polygon(self.image, (100, 100, 120), [(base_w//2, 0), (base_w, base_h), (0, base_h)])
-            pygame.draw.polygon(self.image, (255, 255, 255), [(base_w//2, 0), (base_w, base_h), (0, base_h)], 2)
 
+        # Cria imagem inicial
+        if self.has_images:
+            self.original_image = self.sprites['neutral']
+        else:
+            self.original_image = pygame.Surface(self.base_size, pygame.SRCALPHA)
+            pygame.draw.polygon(self.original_image, (100, 100, 120), [(base_w//2, 0), (base_w, base_h), (0, base_h)])
+
+        self.image = self.original_image
         self.rect = self.image.get_rect()
-        # Posiciona no centro da tela VIRTUAL
-        self.rect.centerx = WIDTH // 2
-        self.rect.bottom = HEIGHT - 50 # Margem inferior
+        self.rect.center = (MAP_WIDTH // 2, MAP_HEIGHT // 2)
         
         self.hp = self.data['hp']
         self.max_hp = self.data['hp']
         self.speed = self.data['speed'] * SCALE
-        
         self.weapons = WeaponSystem()
-        self.vel_x = 0
-        self.vel_y = 0
-        self.is_shooting = False
-        self.shoot_timer = 0
+        self.vel_x, self.vel_y = 0, 0
+        self.angle = 0 
         
-        # PowerUp
-        self.powerup_timer = 0
-        self.powered_up = False
+        self.is_shooting, self.shoot_timer = False, 0
+        self.powerup_timer, self.powered_up = 0, False
 
     def load_and_scale(self, filename):
         path = os.path.join(ASSETS_FOLDER, filename)
@@ -81,69 +71,129 @@ class Player(pygame.sprite.Sprite):
         self.powerup_timer = pygame.time.get_ticks()
         self.hp = min(self.hp + 20, self.max_hp)
 
+    def rotate(self):
+        # Se estiver praticamente parado, não muda a rotação
+        if abs(self.vel_x) < 0.1 and abs(self.vel_y) < 0.1:
+            return
+
+        # 1. Escolhe a imagem base (Lógica nova: Só inclina nas diagonais)
+        base_img = self.sprites['neutral'] if self.has_images else self.original_image
+
+        if self.has_images:
+            # É diagonal se estiver movendo em X E em Y ao mesmo tempo
+            is_diagonal = (abs(self.vel_x) > 0.5 and abs(self.vel_y) > 0.5)
+            
+            if is_diagonal:
+                if self.vel_x < 0: 
+                    base_img = self.sprites['left'] # Diagonal Esquerda
+                else: 
+                    base_img = self.sprites['right'] # Diagonal Direita
+            else:
+                # Movimento Reto (Só X ou Só Y) -> Usa Neutral
+                base_img = self.sprites['neutral']
+
+        # 2. Calcula ângulo (em graus)
+        # Math.atan2 retorna o ângulo do vetor de movimento
+        self.angle = math.degrees(math.atan2(-self.vel_y, self.vel_x)) - 90
+        
+        # 3. Aplica rotação
+        self.image = pygame.transform.rotate(base_img, self.angle)
+        
+        # 4. Mantém o centro correto (evita tremedeira)
+        self.rect = self.image.get_rect(center=self.rect.center)
+
     def update(self):
         self.rect.x += self.vel_x
         self.rect.y += self.vel_y
         
-        # Mantém dentro da tela VIRTUAL
+        # Limites
         if self.rect.left < 0: self.rect.left = 0
-        if self.rect.right > WIDTH: self.rect.right = WIDTH
+        if self.rect.right > MAP_WIDTH: self.rect.right = MAP_WIDTH
         if self.rect.top < 0: self.rect.top = 0
-        if self.rect.bottom > HEIGHT: self.rect.bottom = HEIGHT
+        if self.rect.bottom > MAP_HEIGHT: self.rect.bottom = MAP_HEIGHT
         
+        self.rotate()
+
         if self.powered_up and pygame.time.get_ticks() - self.powerup_timer > 5000:
             self.powered_up = False
 
-        if self.has_images:
-            if self.vel_x < -1.0: 
-                self.image = self.sprites['left']
-            elif self.vel_x > 1.0:
-                self.image = self.sprites['right']
-            else:
-                if self.is_shooting and (pygame.time.get_ticks() - self.shoot_timer < 100):
-                    self.image = self.sprites['shoot']
-                else:
-                    self.image = self.sprites['neutral']
-                    self.is_shooting = False
+class BigMap(pygame.sprite.Sprite):
+    def __init__(self, map_file):
+        super().__init__()
+        bg_path = os.path.join(ASSETS_FOLDER, map_file)
+        try:
+            self.image = pygame.image.load(bg_path).convert()
+            if self.image.get_size() != (MAP_WIDTH, MAP_HEIGHT):
+                 self.image = pygame.transform.scale(self.image, (MAP_WIDTH, MAP_HEIGHT))
+        except Exception:
+            self.image = pygame.Surface((MAP_WIDTH, MAP_HEIGHT))
+            self.image.fill((194, 178, 128)) 
+            pygame.draw.rect(self.image, (0, 100, 200), (0,0,MAP_WIDTH, MAP_HEIGHT), 50)
+        self.rect = self.image.get_rect(topleft=(0, 0))
 
-# --- CLASSE INIMIGO ---
 class Enemy(pygame.sprite.Sprite):
     def __init__(self, x, y, model_name="Gripen F-39E"):
         super().__init__()
-        
-        if model_name in AIRCRAFT_DATA:
-            self.data = AIRCRAFT_DATA[model_name]
-        else:
-            self.data = AIRCRAFT_DATA['Gripen F-39E']
-            
+        if model_name in AIRCRAFT_DATA: self.data = AIRCRAFT_DATA[model_name]
+        else: self.data = AIRCRAFT_DATA['Gripen F-39E']
         self.prefix = self.data['prefix']
-        
         base_w = int(70 * SCALE * self.data.get('scale_factor', 1.0))
         base_h = int(90 * SCALE * self.data.get('scale_factor', 1.0))
         self.base_size = (base_w, base_h)
-        
         try:
             path = os.path.join(ASSETS_FOLDER, f"{self.prefix}_neutral.png")
             img = pygame.image.load(path).convert_alpha()
-            img_scaled = pygame.transform.scale(img, self.base_size)
-            self.image = pygame.transform.rotate(img_scaled, 180)
+            self.original_image = pygame.transform.scale(img, self.base_size)
+            # CORREÇÃO: Não rotacionar 180 aqui. Eles usam a mesma orientação base do player.
         except Exception:
-            self.image = pygame.Surface(self.base_size)
-            self.image.fill((200, 50, 50))
-            pygame.draw.line(self.image, WHITE, (0,0), (base_w, base_h), 3)
+            self.original_image = pygame.Surface(self.base_size)
+            self.original_image.fill((200, 50, 50))
 
-        self.rect = self.image.get_rect()
-        self.rect.centerx = x
-        self.rect.y = y
-        self.speed_y = (self.data['speed'] * 0.7) * SCALE 
+        self.image = self.original_image
+        self.rect = self.image.get_rect(center=(x, y))
         self.hp = self.data['hp'] * 0.4 
+        self.speed = (self.data['speed'] * 0.5) * SCALE 
+        
+        self.vel_x = 0
+        self.vel_y = 0
+        self.change_dir_timer = 0
+        self.pick_new_direction()
+
+    def pick_new_direction(self):
+        # Garante que SEMPRE se mova (evita 0,0)
+        while True:
+            dir_x = random.choice([-1, 0, 1])
+            dir_y = random.choice([-1, 0, 1])
+            if dir_x != 0 or dir_y != 0:
+                break
+        
+        self.vel_x = dir_x * self.speed
+        self.vel_y = dir_y * self.speed
+        
+        # Rotaciona para olhar para onde vai
+        angle = math.degrees(math.atan2(-self.vel_y, self.vel_x)) - 90
+        self.image = pygame.transform.rotate(self.original_image, angle)
+        self.rect = self.image.get_rect(center=self.rect.center)
 
     def update(self):
-        self.rect.y += self.speed_y
-        if self.rect.top > HEIGHT:
-            self.kill()
+        self.rect.x += self.vel_x
+        self.rect.y += self.vel_y
+        
+        # Ricochete nas paredes
+        if self.rect.left < 0 or self.rect.right > MAP_WIDTH:
+            self.vel_x *= -1
+            self.rect.x += self.vel_x # Desencalha
+            self.pick_new_direction() # Muda direção ao bater
+        if self.rect.top < 0 or self.rect.bottom > MAP_HEIGHT:
+            self.vel_y *= -1
+            self.rect.y += self.vel_y # Desencalha
+            self.pick_new_direction() # Muda direção ao bater
+            
+        self.change_dir_timer += 1
+        if self.change_dir_timer > 100: # Muda a cada 3 segundos
+            self.change_dir_timer = 0
+            self.pick_new_direction()
 
-# --- CLASSE EXPLOSÃO ---
 class Explosion(pygame.sprite.Sprite):
     def __init__(self, center):
         super().__init__()
@@ -151,113 +201,32 @@ class Explosion(pygame.sprite.Sprite):
         self.image = pygame.Surface((self.size, self.size), pygame.SRCALPHA)
         self.rect = self.image.get_rect(center=center)
         self.timer = 15 
-
     def update(self):
         self.timer -= 1
         if self.timer % 3 == 0:
             self.image.fill((0,0,0,0))
-            color = (255, random.randint(100,255), 0)
-            pygame.draw.circle(self.image, color, (self.size//2, self.size//2), (self.size//2) * (self.timer/15))
-        if self.timer <= 0:
-            self.kill()
+            pygame.draw.circle(self.image, (255, random.randint(100,255), 0), (self.size//2, self.size//2), (self.size//2) * (self.timer/15))
+        if self.timer <= 0: self.kill()
 
-# --- CLASSE POWERUP ---
 class PowerUp(pygame.sprite.Sprite):
     def __init__(self, center):
         super().__init__()
         self.size = int(25 * SCALE)
         self.image = pygame.Surface((self.size, self.size))
-        self.image.fill(CYAN)
-        pygame.draw.rect(self.image, WHITE, (0,0,self.size,self.size), 2)
-        
+        self.image.fill(CYAN); pygame.draw.rect(self.image, WHITE, (0,0,self.size,self.size), 2)
         font = pygame.font.SysFont('arial', int(15*SCALE), bold=True)
         txt = font.render("P", True, BLACK)
         self.image.blit(txt, (self.size//2 - txt.get_width()//2, self.size//2 - txt.get_height()//2))
-        
         self.rect = self.image.get_rect(center=center)
-        self.speed_y = 2 * SCALE
 
-    def update(self):
-        self.rect.y += self.speed_y
-        if self.rect.top > HEIGHT:
-            self.kill()
-
-# --- CLASSE NUVEM ---
 class Cloud(pygame.sprite.Sprite):
     def __init__(self):
         super().__init__()
-        w = random.randint(int(50*SCALE), int(150*SCALE))
+        w = random.randint(int(100*SCALE), int(300*SCALE))
         h = int(w * 0.6)
         self.image = pygame.Surface((w, h), pygame.SRCALPHA)
-        num_blobs = random.randint(3, 6)
-        for _ in range(num_blobs):
-            bx = random.randint(0, w//2)
-            by = random.randint(0, h//2)
-            radius = random.randint(int(10*SCALE), int(30*SCALE))
-            pygame.draw.circle(self.image, (255, 255, 255, 60), (bx+radius, by+radius), radius)
+        for _ in range(5):
+            pygame.draw.circle(self.image, (255, 255, 255, 50), (random.randint(0, w), random.randint(0, h)), random.randint(20, 60))
         self.rect = self.image.get_rect()
-        self.rect.x = random.randint(0, WIDTH - w)
-        self.rect.y = random.randint(-200, -50)
-        self.speed_y = random.randint(1, 3) * SCALE
-
-    def update(self):
-        self.rect.y += self.speed_y
-        if self.rect.top > HEIGHT:
-            self.rect.x = random.randint(0, WIDTH - self.rect.width)
-            self.rect.y = random.randint(-200, -50)
-
-# --- BACKGROUND OTIMIZADO ---
-class BackgroundLayer:
-    def __init__(self, image_file, scroll_speed_factor):
-        self.scroll_y = 0
-        self.speed = SCROLL_SPEED * scroll_speed_factor
-        
-        bg_path = os.path.join(ASSETS_FOLDER, image_file)
-        try:
-            img_raw = pygame.image.load(bg_path)
-            
-            # PERFORMANCE TOTAL:
-            # 1. Converte formato
-            if "sea" in image_file:
-                img = img_raw.convert()
-            else:
-                img = img_raw.convert_alpha()
-            
-            # 2. Redimensiona UMA VEZ para a resolução virtual (pequena)
-            self.bg_image = pygame.transform.scale(img, (WIDTH, HEIGHT))
-            self.bg_h = HEIGHT
-            self.has_image = True
-        except Exception as e:
-            print(f"Erro fundo {image_file}: {e}")
-            self.has_image = False
-            self.bg_image = pygame.Surface((WIDTH, HEIGHT))
-            self.bg_h = HEIGHT
-            if scroll_speed_factor > 0.5: self.bg_image.fill((0,0,0,0)) 
-            else: self.bg_image.fill((0, 50, 100))
-
-    def update(self):
-        self.scroll_y += self.speed
-        if self.scroll_y >= self.bg_h:
-            self.scroll_y = 0
-
-    def draw(self, screen):
-        if self.has_image:
-            screen.blit(self.bg_image, (0, self.scroll_y))
-            if self.scroll_y > 0:
-                screen.blit(self.bg_image, (0, self.scroll_y - self.bg_h))
-        else:
-             screen.blit(self.bg_image, (0,0))
-
-class Background:
-    def __init__(self, layers_config):
-        self.layers = []
-        for img_file, speed_factor in layers_config:
-            self.layers.append(BackgroundLayer(img_file, speed_factor))
-
-    def update(self):
-        for layer in self.layers:
-            layer.update()
-
-    def draw(self, screen):
-        for layer in self.layers:
-            layer.draw(screen)
+        self.rect.x = random.randint(0, MAP_WIDTH)
+        self.rect.y = random.randint(0, MAP_HEIGHT)
