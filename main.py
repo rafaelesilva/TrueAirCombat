@@ -5,13 +5,12 @@ import random
 import math
 from settings import *
 from camera import Camera
-from sprites import Player, BigMap, Explosion, Enemy, Cloud, PowerUp
-# CORREÇÃO: Adicionei 'Particle' aqui
+from sprites import Player, BigMap, Explosion, MassiveExplosion, Enemy, Cloud, PowerUp
 from weapons import Projectile, Particle 
 from level_manager import LevelManager
 from interface import UIManager
 
-print("\n--- INICIANDO MODO DESERT STRIKE (FINAL + PARTICLES) ---")
+print("\n--- INICIANDO MODO DESERT STRIKE (BOMBAS FIX) ---")
 folder = os.path.dirname(__file__)
 assets_folder = os.path.join(folder, 'assets')
 
@@ -61,6 +60,7 @@ class Game:
 
     def new_game(self):
         self.score = 0
+        # Grupos separados para controle de desenho
         self.all_sprites = pygame.sprite.Group()
         self.enemies = pygame.sprite.Group()
         self.bullets = pygame.sprite.Group()
@@ -68,6 +68,7 @@ class Game:
         self.powerups = pygame.sprite.Group()
         self.clouds = pygame.sprite.Group() 
         self.particles = pygame.sprite.Group()
+        self.explosions = pygame.sprite.Group() # Grupo novo para explosoes
 
         self.map = BigMap("big_map.png")
         self.camera = Camera(MAP_WIDTH, MAP_HEIGHT)
@@ -105,7 +106,7 @@ class Game:
             scaled_surf = pygame.transform.scale(self.virtual_screen, (REAL_WIDTH, REAL_HEIGHT))
             self.screen.blit(scaled_surf, (0, 0))
             
-            # Debug Visual (Bolinha Amarela)
+            # Debug Visual
             for f_id, pos in self.fingers.items():
                 rx = int((pos[0] / WIDTH) * REAL_WIDTH)
                 ry = int((pos[1] / HEIGHT) * REAL_HEIGHT)
@@ -151,16 +152,12 @@ class Game:
 
         for finger_pos in self.fingers.values():
             fx, fy = finger_pos
-            
-            # Lógica do D-Pad Circular
             dx = fx - self.ui.dpad_center[0]
             dy = fy - self.ui.dpad_center[1]
             dist = math.hypot(dx, dy)
-            
             if 10 < dist < self.ui.dpad_radius:
                 angle = math.atan2(dy, dx)
                 deg = math.degrees(angle)
-                
                 if -22.5 <= deg <= 22.5: move_x = 1
                 elif 22.5 < deg < 67.5: move_x, move_y = 1, 1
                 elif 67.5 <= deg <= 112.5: move_y = 1
@@ -180,20 +177,8 @@ class Game:
                 self.player.trigger_shoot_anim()
                 self.play_sound('shoot')
                 w_type = self.player.weapons.get_current()
-                
-                angle_rad = math.radians(self.player.angle + 90)
-                # Velocidade do tiro (vetor)
-                # Pegamos a velocidade do míssil definida no settings (via WeaponSystem -> Projectile)
-                # Mas aqui criamos o projetil primeiro para pegar a velocidade dele depois?
-                # Melhor: instanciamos e ele já calcula.
-                
-                b = Projectile(self.player.rect.centerx, self.player.rect.centery, self.player.angle + 90, w_type, "PLAYER")
-                
-                # Hack para mover o projetil no update (sobrescrevendo o método update do objeto)
-                # Como a classe Projectile no weapons.py já tem movimento vetorial,
-                # NÃO precisamos do lambda hack aqui se o weapons.py estiver correto!
-                # Vou manter o padrão simples: adicionar ao grupo e deixar a classe Projectile cuidar do movimento.
-                
+                angle = self.player.angle + 90
+                b = Projectile(self.player.rect.centerx, self.player.rect.centery, angle, w_type, "PLAYER")
                 self.all_sprites.add(b); self.bullets.add(b)
 
     def update_game(self):
@@ -202,7 +187,39 @@ class Game:
         self.level_manager.update()
         self.particles.update()
         self.camera.update(self.player)
+        self.explosions.update()
         
+        # --- LÓGICA DE EXPLOSÃO DA BOMBA (Impacto no Solo) ---
+        for b in self.bullets:
+            if b.category == 'BOMB' and b.should_explode:
+                # 1. Cria Explosão Massiva
+                expl = MassiveExplosion(b.rect.center)
+                self.explosions.add(expl) # Adiciona no grupo de explosões
+                self.play_sound('expl')
+                
+                # 2. Dano em Área (AoE)
+                blast_radius = 250 # Raio da explosão
+                for enemy in self.enemies:
+                    # Calcula distancia da bomba ate o inimigo
+                    dx = enemy.rect.centerx - b.rect.centerx
+                    dy = enemy.rect.centery - b.rect.centery
+                    dist = math.hypot(dx, dy)
+                    
+                    if dist < blast_radius:
+                        # Dano cai com a distância (mais perto = mais dano)
+                        # Dano Base (b.damage) * Fator de Distancia
+                        damage_factor = (1 - (dist / blast_radius))
+                        damage = b.damage * damage_factor
+                        enemy.hp -= damage
+                        
+                        if enemy.hp <= 0:
+                            self.score += 100
+                            enemy.kill()
+                            self.all_sprites.add(Explosion(enemy.rect.center))
+                
+                # 3. Remove a bomba
+                b.kill()
+
         # Inimigos atiram
         current_time = pygame.time.get_ticks()
         for enemy in self.enemies:
@@ -212,45 +229,49 @@ class Game:
                 self.all_sprites.add(b)
                 self.enemy_bullets.add(b)
 
-        # Rastro de Fumaça (Particles)
+        # Fumaça
         all_missiles = list(self.bullets) + list(self.enemy_bullets)
         for b in all_missiles:
-            if b.type != 'VULCAN':
+            if b.category != 'BOMB' and b.type != 'VULCAN':
                 if random.random() < 0.5:
                     p = Particle(b.rect.center, (200, 200, 200), random.randint(4, 8), 20)
                     self.particles.add(p)
 
-        # Colisões
-        hits = pygame.sprite.groupcollide(self.enemies, self.bullets, False, True)
+        # Colisões Diretas (Mísseis normais)
+        hits = pygame.sprite.groupcollide(self.enemies, self.bullets, False, False) # False, False para controlar kill manual
         for enemy, bullets in hits.items():
             for b in bullets:
-                enemy.hp -= 20
+                # Se for bomba, ignora colisão direta (ela explode por tempo/chão)
+                if b.category == 'BOMB':
+                    continue
+                
+                enemy.hp -= b.damage
+                b.kill() # Míssil morre ao bater
+                
                 if enemy.hp <= 0:
                     self.score += 100
                     self.play_sound('expl')
                     if random.random() < 0.15:
                         p = PowerUp(enemy.rect.center)
                         self.all_sprites.add(p); self.powerups.add(p)
-                    expl = Explosion(enemy.rect.center)
-                    self.all_sprites.add(expl)
+                    self.all_sprites.add(Explosion(enemy.rect.center))
                     enemy.kill()
         
+        # Dano no Jogador
         hits_player = pygame.sprite.spritecollide(self.player, self.enemy_bullets, True)
         for b in hits_player:
-            self.player.hp -= 15
+            self.player.hp -= b.damage
             self.play_sound('expl')
             self.all_sprites.add(Explosion(self.player.rect.center))
             if self.player.hp <= 0:
-                self.save_highscore()
-                self.state = 'MENU'
+                self.save_highscore(); self.state = 'MENU'
 
         if pygame.sprite.spritecollide(self.player, self.enemies, True):
             self.player.hp -= 30
             self.all_sprites.add(Explosion(self.player.rect.center))
             self.play_sound('expl')
             if self.player.hp <= 0:
-                self.save_highscore()
-                self.state = 'MENU' 
+                self.save_highscore(); self.state = 'MENU' 
                 
         hit_powerup = pygame.sprite.spritecollide(self.player, self.powerups, True)
         for p in hit_powerup:
@@ -258,15 +279,52 @@ class Game:
             self.player.enable_powerup()
 
     def draw_game(self):
+        # 1. Limpa tela
         self.virtual_screen.fill(BLACK)
+        
+        # --- DESENHO EM CAMADAS (LAYERED DRAWING) ---
+        # A ordem aqui define quem fica em cima de quem
+        
+        # Camada 1: Chão (Mapa)
         self.virtual_screen.blit(self.map.image, self.camera.apply(self.map))
         
-        for p in self.particles:
+        # Camada 2: Partículas (Fumaça fica no chão)
+        for p in self.particles: 
             self.virtual_screen.blit(p.image, self.camera.apply(p))
             
-        for cloud in self.clouds: self.virtual_screen.blit(cloud.image, self.camera.apply(cloud))
-        for sprite in self.all_sprites: self.virtual_screen.blit(sprite.image, self.camera.apply(sprite))
+        # Camada 3: Powerups
+        for p in self.powerups: 
+            self.virtual_screen.blit(p.image, self.camera.apply(p))
+            
+        # Camada 4: PROJÉTEIS (Aqui está a correção visual!)
+        # Desenhamos balas e bombas ANTES dos aviões.
+        # Assim, a bomba parece sair da barriga e ficar embaixo do avião.
+        for b in self.bullets: 
+            self.virtual_screen.blit(b.image, self.camera.apply(b))
+        for b in self.enemy_bullets: 
+            self.virtual_screen.blit(b.image, self.camera.apply(b))
+            
+        # Camada 5: Inimigos
+        for e in self.enemies: 
+            self.virtual_screen.blit(e.image, self.camera.apply(e))
+            
+        # Camada 6: Jogador (Fica em cima das bombas)
+        self.virtual_screen.blit(self.player.image, self.camera.apply(self.player))
         
+        # Camada 7: Explosões (Ficam por cima de tudo)
+        # (Desenhamos as explosoes normais do all_sprites se houverem, e as do grupo explosions)
+        for e in self.explosions:
+            self.virtual_screen.blit(e.image, self.camera.apply(e))
+        # Se houver explosoes antigas no all_sprites, desenhamos tmb
+        for s in self.all_sprites:
+            if isinstance(s, Explosion) or isinstance(s, MassiveExplosion):
+                 self.virtual_screen.blit(s.image, self.camera.apply(s))
+                 
+        # Camada 8: Nuvens (Voam alto)
+        for c in self.clouds: 
+            self.virtual_screen.blit(c.image, self.camera.apply(c))
+        
+        # Camada 9: HUD (Interface Fixa)
         self.ui.draw_hud(self.virtual_screen, self.player, self.enemies)
         
         font = pygame.font.SysFont("arial", 20, bold=True)

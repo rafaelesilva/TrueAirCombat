@@ -3,7 +3,6 @@ import math
 import random
 from settings import *
 
-# --- SISTEMA DE PARTÍCULAS (RASTRO DE FUMAÇA) ---
 class Particle(pygame.sprite.Sprite):
     def __init__(self, pos, color, size, lifetime):
         super().__init__()
@@ -18,89 +17,89 @@ class Particle(pygame.sprite.Sprite):
         if self.lifetime <= 0:
             self.kill()
         else:
-            # Efeito de "dissolver": fica mais transparente e menor
             alpha = int((self.lifetime / self.original_life) * 255)
             self.image.set_alpha(alpha)
 
-# --- CLASSE PROJÉTIL (MÍSSIL BONITO) ---
 class Projectile(pygame.sprite.Sprite):
     def __init__(self, x, y, angle, missile_type, owner_type="PLAYER"):
         super().__init__()
         self.type = missile_type
-        self.owner = owner_type # "PLAYER" ou "ENEMY"
+        self.owner = owner_type 
         self.stats = MISSILE_STATS.get(missile_type, MISSILE_STATS['VULCAN'])
         
         self.speed = self.stats['vel']
         self.color = self.stats['color']
+        self.damage = self.stats.get('dmg', 10)
+        self.category = self.stats.get('type', 'MISSILE') # MISSILE, BOMB ou GUN
         self.angle = angle
         
-        # Cria a "imagem" base do míssil desenhando formas
-        length, width = self.stats['size']
-        self.original_image = pygame.Surface((length + 4, width + 6), pygame.SRCALPHA)
+        # --- TIMER DA BOMBA (Impacto no solo) ---
+        # Se for bomba, ela tem um tempo de vida curto (cair) e depois explode sozinha
+        self.timer = 40 if self.category == 'BOMB' else 200 # 40 frames (~1.3 segs) para cair
+        self.should_explode = False # Flag para o main.py saber que bateu no chão
         
-        # Desenha o corpo do míssil
+        length, width = self.stats['size']
+        self.original_image = pygame.Surface((length + 6, width + 6), pygame.SRCALPHA)
         cy = (width + 6) // 2
         
         if self.type == 'VULCAN':
-            # Tiro simples (bolinha brilhante)
             pygame.draw.circle(self.original_image, self.color, (2, cy), 2)
         else:
-            # --- DESENHO DETALHADO DO MÍSSIL ---
-            # Corpo
-            pygame.draw.rect(self.original_image, self.color, (0, cy - width//2, length, width))
-            # Bico (Nariz)
-            pygame.draw.polygon(self.original_image, (50, 50, 50), [(length, cy - width//2), (length + 4, cy), (length, cy + width//2)])
-            
-            # Aletas (Fins) baseadas no tipo
-            fin_color = (80, 80, 80)
-            if self.stats['fins'] == 'INTAKE': # Meteor (tem entradas de ar)
-                pygame.draw.rect(self.original_image, (30,30,30), (length//2 - 2, cy - width - 1, 4, width + 2))
-            elif self.stats['fins'] == 'GRID': # R-77 (aletas traseiras de grade)
-                pygame.draw.line(self.original_image, fin_color, (2, cy - width), (2, cy + width), 2)
-                pygame.draw.line(self.original_image, fin_color, (0, cy - width), (4, cy - width), 1)
-                pygame.draw.line(self.original_image, fin_color, (0, cy + width), (4, cy + width), 1)
-            else: # Normal (AMRAAM, Sidewinder)
-                # Aletas traseiras
-                pygame.draw.polygon(self.original_image, fin_color, [(0, cy), (4, cy - width - 2), (4, cy + width + 2)])
+            fins = self.stats['fins']
+            if fins == 'BOMB' or fins == 'MOAB':
+                # Desenho Gordinho da Bomba
+                rect_bomb = pygame.Rect(0, cy - width//2, length, width)
+                pygame.draw.ellipse(self.original_image, self.color, rect_bomb)
+                pygame.draw.line(self.original_image, (255, 255, 0), (length-4, cy - width//2 + 2), (length-4, cy + width//2 - 2), 2)
+                pygame.draw.rect(self.original_image, (20, 20, 20), (0, cy - width//2 - 2, 4, width + 4))
+            else:
+                # Desenho Fino de Míssil
+                pygame.draw.rect(self.original_image, self.color, (0, cy - width//2, length, width))
+                pygame.draw.polygon(self.original_image, (50, 50, 50), [(length, cy - width//2), (length + 4, cy), (length, cy + width//2)])
+                fin_c = (80, 80, 80)
+                if fins == 'INTAKE': pygame.draw.rect(self.original_image, (30,30,30), (length//2, cy - width - 1, 4, width + 2))
+                elif fins == 'GRID': pygame.draw.line(self.original_image, fin_c, (2, cy - width), (2, cy + width), 2)
+                else: pygame.draw.polygon(self.original_image, fin_c, [(0, cy), (4, cy - width - 2), (4, cy + width + 2)])
 
-        # Rotaciona para a direção correta
-        # -angle porque o pygame rotaciona anti-horário e nossos graus são matemáticos
         self.image = pygame.transform.rotate(self.original_image, angle)
         self.rect = self.image.get_rect(center=(x, y))
         
-        # Calcula vetor de velocidade (vx, vy)
         rad = math.radians(angle)
         self.vx = math.cos(rad) * self.speed
-        self.vy = -math.sin(rad) * self.speed # Y invertido
+        self.vy = -math.sin(rad) * self.speed 
+        self.pos_x, self.pos_y = float(x), float(y)
         
-        # Posição float para precisão
-        self.pos_x = float(x)
-        self.pos_y = float(y)
+        # Bombas desaceleram (arrasto do ar)
+        self.drag = 0.96 if self.category == 'BOMB' else 1.0
 
     def update(self):
         self.pos_x += self.vx
         self.pos_y += self.vy
+        
+        # Lógica Específica de Bomba
+        if self.category == 'BOMB':
+            self.vx *= self.drag
+            self.vy *= self.drag
+            self.timer -= 1
+            if self.timer <= 0:
+                self.should_explode = True # Ativa a detonação no chão
+        
         self.rect.centerx = int(self.pos_x)
         self.rect.centery = int(self.pos_y)
         
-        # Limites do mapa (deleta se sair muito longe)
         if (self.rect.x < -100 or self.rect.x > MAP_WIDTH + 100 or
             self.rect.y < -100 or self.rect.y > MAP_HEIGHT + 100):
             self.kill()
 
-# --- GERENCIADOR DE ARMAS ---
 class WeaponSystem:
     def __init__(self, missile_type='AIM-120'):
         self.primary = 'VULCAN'
         self.secondary = missile_type
         self.current = self.primary
-        self.ammo = 50 # Mísseis limitados? (Por enquanto infinito na lógica)
 
     def switch(self):
-        if self.current == self.primary:
-            self.current = self.secondary
-        else:
-            self.current = self.primary
+        if self.current == self.primary: self.current = self.secondary
+        else: self.current = self.primary
             
     def get_current(self):
         return self.current
